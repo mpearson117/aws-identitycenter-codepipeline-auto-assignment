@@ -20,10 +20,78 @@ ic_admin = boto3.client('sso-admin', region_name=runtime_region)
 ic_bucket_name = os.environ.get('IC_S3_BucketName')
 ic_instance_arn = os.environ.get('IC_InstanceArn')
 target_mapping_file_name = os.environ.get('TargetFileName')
+accounts = []
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+def account_list(list1, list2):
+    if list1 == None:
+        list1=[]
+    if list2 == None:
+        list2=[]
+    unique_list = list(set(list1+list2))
+    return unique_list
+
+def list_root():
+    try:
+        response = orgs_client.list_roots()
+        roots = response['Roots']
+    except ClientError as error:
+        logger.error("%s", error)
+        roots = None
+    return roots
+
+def get_ou_id(parent_name):
+    try:
+        id_list = []
+        root_id = list_root()[0]['Id']
+        response = orgs_client.list_organizational_units_for_parent(ParentId=root_id)
+        ous = response['OrganizationalUnits']
+        while 'NextToken' in response:
+            response = orgs_client.list_organizational_units_for_parent(
+                ParentId=root_id,
+                NextToken=response['NextToken']
+            )
+            ous += response['OrganizationalUnits']
+
+        for item in ous:
+            if item['Name'] == parent_name:
+                id_list.append(item['Id'])
+        return id_list[0]
+    except IndexError:
+        return None
+    
+def list_accounts_for_parent(parent_id):
+    try:
+        response = orgs_client.list_accounts_for_parent(
+            ParentId=parent_id
+        )
+
+        account_list = response.get('Accounts', [])
+        next_token = response.get('NextToken', None)
+
+        while next_token is not None:
+            response = orgs_client.list_accounts_for_parent(
+                ParentId=parent_id,
+                NextToken=next_token
+            )
+            logger.info("Extending Account List")
+            account_list.extend(response.get('Accounts', []))
+            next_token = response.get('NextToken', None)
+
+        return account_list
+    except ClientError as e:
+        logger.log_unhandled_exception(e)
+        raise
+
+def list_accounts(parent_list):
+    for item in parent_list:
+        if get_ou_id(item) is not None:
+            accounts_for_parent = list_accounts_for_parent(get_ou_id(item))
+            for account in accounts_for_parent:
+                accounts.append(account["Id"])
+    return accounts
 
 def list_all_current_account_assignment(acct_list, current_aws_permission_sets,
                                         pipeline_id):
@@ -112,7 +180,7 @@ def drift_detect_update(all_assignments, global_file_contents,
     for each_assignment in check_list:
         try:
             for target_mapping in target_file_contents:
-                if each_assignment['AccountId'] in target_mapping['TargetAccountid']:
+                if each_assignment['AccountId'] in account_list(target_mapping['TargetAccountid'], list_accounts(target_mapping['TargetOrganizationUnits'])):
                     for each_perm_set_name in target_mapping['PermissionSetName']:
                         permission_set_arn = current_aws_permission_sets[each_perm_set_name]['Arn']
                         target_group_id = get_groupid(target_mapping['TargetGroupName'])
@@ -256,7 +324,7 @@ def target_group_array_mapping(target_file_contents,
         try:
             for mapping in target_file_contents:
                 for each_perm_set_name in mapping['PermissionSetName']:
-                    for target_account_id in mapping['TargetAccountid']:
+                    for target_account_id in account_list(mapping['TargetAccountid'], list_accounts(mapping['TargetOrganizationUnits'])):
                         permission_set_arn = current_aws_permission_sets[each_perm_set_name]['Arn']
                         group_id = get_groupid(mapping['TargetGroupName'])
                         if not group_id:

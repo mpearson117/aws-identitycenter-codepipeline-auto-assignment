@@ -4,6 +4,9 @@
       "PermissionSetName":[
          "4-example-operations"
       ],
+      "TargetOrganizationUnits":[
+         "Security"
+      ],
       "TargetAccountid":[
          "123456789012"
       ]

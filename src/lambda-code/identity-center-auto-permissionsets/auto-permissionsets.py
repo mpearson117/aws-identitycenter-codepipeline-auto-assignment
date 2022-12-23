@@ -42,6 +42,7 @@ def get_all_permission_sets(pipeline_id):
             MaxResults=100
         )
         all_perm_sets_arns = response['PermissionSets']
+        logger.info(all_perm_sets_arns)
         while 'NextToken' in response:
             response = ic_admin.list_permission_sets(
                 InstanceArn=ic_instance_arn,

@@ -175,6 +175,12 @@ Resources:
               - Sid: EssentialActions
                 Effect: Allow
                 Action:
+                  - 'organizations:ListAccountsForParent'
+                  - 'organizations:ListAccounts'
+                  - 'organizations:ListRoots'
+                  - 'organizations:DescribeOrganization'
+                  - 'organizations:ListOrganizationalUnitsForParent'
+                  - 'organizations:ListAWSServiceAccessForOrganization'
                   - 'codepipeline:PutJobFailureResult'
                   - 'codepipeline:PutJobSuccessResult'
                   - 'iam:AttachRolePolicy'
