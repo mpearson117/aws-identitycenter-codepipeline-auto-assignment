@@ -60,9 +60,11 @@ def get_all_permission_sets(pipeline_id):
             description = describe_perm_set['PermissionSet']['Description']
             perm_set_name = describe_perm_set['PermissionSet']['Name']
             perm_set_arn = describe_perm_set['PermissionSet']['PermissionSetArn']
+            session_duration = describe_perm_set['PermissionSet']['SessionDuration']
             permission_set_name_and_arn[perm_set_name] = {
                 'Arn': perm_set_arn,
-                'Description': description
+                'Description': description,
+                'SessionDuration': session_duration
                 }
     except ic_admin.exceptions.ThrottlingException as error:
         logger.warning("Hit IAM Identity Center API limits. Sleep 5s...%s", error)
@@ -428,6 +430,21 @@ def delete_permission_set(perm_set_arn, perm_set_name, pipeline_id):
         )
 
 
+def sync_session_duration(perm_set_arn, local_session_duration, aws_session_duration):
+    """Synchronize the session duration between the JSON file and AWS service"""
+    if not local_session_duration == aws_session_duration:
+        try:
+            logger.info('Updating session duration for %s', perm_set_arn)
+            ic_admin.update_permission_set(
+                InstanceArn=ic_instance_arn,
+                PermissionSetArn=perm_set_arn,
+                SessionDuration=local_session_duration
+            )
+            sleep(0.1)  # Aviod hitting API limit.
+        except ClientError as error:
+            logger.warning("%s", error)
+
+
 def sync_description(perm_set_arn, local_desc, aws_desc, session_duration):
     """Synchronize the description between the JSON file and AWS service"""
     if not local_desc == aws_desc:
@@ -704,17 +721,20 @@ def sync_json_with_aws(local_files, aws_permission_sets, pipeline_id):
                 created_perm_set_name = created_perm_set['PermissionSet']['Name']
                 created_perm_set_arn = created_perm_set['PermissionSet']['PermissionSetArn']
                 created_perm_set_desc = created_perm_set['PermissionSet']['Description']
+                created_perm_set_session_duration = created_perm_set['PermissionSet']['SessionDuration']
                 aws_permission_sets[created_perm_set_name] = {
                     'Arn': created_perm_set_arn,
-                    'Description': created_perm_set_desc
+                    'Description': created_perm_set_desc,
+                    'SessionDuration': created_perm_set_session_duration
                     }
 
             # Synchronize managed and inline policies for all local permission sets with AWS.
             sync_managed_policies(local_managed_policies, aws_permission_sets[local_name]['Arn'], pipeline_id)
-            sync_customer_policies(local_customer_policies,aws_permission_sets[local_name]['Arn'], pipeline_id)
+            #sync_customer_policies(local_customer_policies,aws_permission_sets[local_name]['Arn'], pipeline_id)
             sync_inline_policies(local_inline_policy, aws_permission_sets[local_name]['Arn'], pipeline_id)
             sync_description(aws_permission_sets[local_name]['Arn'], local_desc, aws_permission_sets[local_name]['Description'],local_session_duration)
             sync_tags(local_name, local_tags, aws_permission_sets[local_name]['Arn'])
+            sync_session_duration(aws_permission_sets[local_name]['Arn'], local_session_duration, aws_permission_sets[local_name]['SessionDuration'])
             reprovision_permission_sets(local_name, aws_permission_sets[local_name]['Arn'], pipeline_id)
 
         # If a permission set exists in AWS but not on the local - delete it
@@ -755,6 +775,8 @@ def lambda_handler(event, context):
     """Lambda_handler"""
     logger.info(event)
     logger.debug(context)
+
+    logger.info("boto3 version:"+boto3.__version__)
 
     if 'RequestType' in event and event['RequestType'] == 'Delete':
         cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
