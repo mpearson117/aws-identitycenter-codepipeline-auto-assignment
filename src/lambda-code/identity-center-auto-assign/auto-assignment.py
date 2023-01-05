@@ -184,8 +184,9 @@ def drift_detect_update(all_assignments, global_file_contents,
                     for each_perm_set_name in target_mapping['PermissionSetName']:
                         permission_set_arn = current_aws_permission_sets[each_perm_set_name]['Arn']
                         target_group_id = get_groupid(target_mapping['TargetGroupName'])
-                    if each_assignment['PrincipalId'] == target_group_id and each_assignment['PermissionSetArn'] == permission_set_arn:
-                        remove_list.append(each_assignment)
+                        if each_assignment['PrincipalId'] == target_group_id and each_assignment['PermissionSetArn'] == permission_set_arn:
+                            if each_assignment not in remove_list:
+                                remove_list.append(each_assignment)
         except ic_admin.exceptions.ThrottlingException as error:
             logger.warning("%s. Hit IAM Identity Center API limit. Sleep 3s...", error)
             sleep(3)
@@ -195,8 +196,10 @@ def drift_detect_update(all_assignments, global_file_contents,
                 jobId=pipeline_id,
                 failureDetails={'type': 'JobFailed','message':str(error)}
             )
+    logger.info("Remove List..%s", remove_list)
     for item in remove_list:
-        check_list.remove(item)
+        check_list.remove(item)    
+    logger.info("Pruned Check List..%s", check_list)
     # Search drift by checking the element that remain in check_list.
     if len(check_list) == 0:
         logger.info("IAM Identity Center assignments has been applied. No drift was found within current assignments :)")
