@@ -20,7 +20,7 @@ ic_admin = boto3.client('sso-admin', region_name=runtime_region)
 ic_bucket_name = os.environ.get('IC_S3_BucketName')
 ic_instance_arn = os.environ.get('IC_InstanceArn')
 target_mapping_file_name = os.environ.get('TargetFileName')
-accounts = []
+accounts_map = {}
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -40,12 +40,11 @@ def list_root():
     except ClientError as error:
         logger.error("%s", error)
         roots = None
-    return roots
+    return roots[0]['Id']
 
-def get_ou_id(parent_name):
+def get_ou_list():
+    root_id = list_root()
     try:
-        id_list = []
-        root_id = list_root()[0]['Id']
         response = orgs_client.list_organizational_units_for_parent(ParentId=root_id)
         ous = response['OrganizationalUnits']
         while 'NextToken' in response:
@@ -54,11 +53,12 @@ def get_ou_id(parent_name):
                 NextToken=response['NextToken']
             )
             ous += response['OrganizationalUnits']
+        
+        ou_list = {}
+        for ou in ous:
+            ou_list[ou['Name']] = ou['Id']
 
-        for item in ous:
-            if item['Name'] == parent_name:
-                id_list.append(item['Id'])
-        return id_list[0]
+        return ou_list
     except IndexError:
         return None
     
@@ -85,12 +85,26 @@ def list_accounts_for_parent(parent_id):
         logger.log_unhandled_exception(e)
         raise
 
+def get_accounts_list(ou_id):
+    accounts = []
+    accounts_for_parent = list_accounts_for_parent(ou_id)
+    for account in accounts_for_parent:
+        if account.get('Status') == "ACTIVE":
+            accounts.append(account["Id"])
+
+    return accounts
+
+def build_accounts_map():
+    ou_list = get_ou_list()
+
+    for key, value in ou_list.items():
+        accounts_map[key] = get_accounts_list(value)
+    
+    logger.info("All active accounts in nested OUs %s:" %(accounts_map))
+
 def list_accounts(parent_list):
-    for item in parent_list:
-        if get_ou_id(item) is not None:
-            accounts_for_parent = list_accounts_for_parent(get_ou_id(item))
-            for account in accounts_for_parent:
-                accounts.append(account["Id"])
+    accounts = []
+    accounts = [account for item in parent_list for account in accounts_map[item]]
     return accounts
 
 def list_all_current_account_assignment(acct_list, current_aws_permission_sets,
@@ -455,6 +469,9 @@ def lambda_handler(event, context):
         # Prepare account id.
         acct_list = get_org_accounts()
         logger.info(acct_list)
+        # Building Accounts Structure
+        build_accounts_map()
+        logger.info(accounts_map)
         # Check if Source files exist.
         global_file_contents = get_global_mapping_contents(ic_bucket_name, global_mapping_file_name, pipeline_id)
         target_file_contents = get_target_mapping_contents(ic_bucket_name, target_mapping_file_name, pipeline_id)
