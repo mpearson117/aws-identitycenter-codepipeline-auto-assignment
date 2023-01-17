@@ -262,10 +262,24 @@ def sync_managed_policies(local_managed_policies, perm_set_arn, pipeline_id):
             InstanceArn=ic_instance_arn,
             PermissionSetArn=perm_set_arn
         )
+        aws_managed_policies = list_managed_policies.get('AttachedManagedPolicies', {})
         sleep(0.1)  # Aviod hitting API limit.
+        next_token = list_managed_policies.get('NextToken', None)
+
+        while next_token is not None:
+            list_managed_policies_after_token = ic_admin.list_managed_policies_in_permission_set(
+                InstanceArn=ic_instance_arn,
+                PermissionSetArn=perm_set_arn,
+                NextToken=next_token
+            )
+            logger.info("Extending Managed Policies list List")
+            for item in list_managed_policies_after_token.get('AttachedManagedPolicies', {}):
+                aws_managed_policies.append(item)
+
+            next_token = list_managed_policies_after_token.get('NextToken', None)
 
         # Populate arrays for Managed Policy tracking.
-        for aws_managed_policy in list_managed_policies['AttachedManagedPolicies']:
+        for aws_managed_policy in aws_managed_policies:
             aws_managed_attached_names.append(aws_managed_policy['Name'])
             aws_managed_attached_dict[aws_managed_policy['Name']] = aws_managed_policy['Arn']
 
